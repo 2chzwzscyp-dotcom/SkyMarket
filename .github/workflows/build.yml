@@ -8,14 +8,13 @@ steps:
 with:
 java-version: '21'
 distribution: 'temurin'
+- run: mkdir -p src/main/java/com/swain/skymarket src/main/resources
 - run: |
-mkdir -p src/main/java/com/swain/skymarket src/main/resources
-python3 -c '
-open("pom.xml","w").write("""<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><groupId>com.swain.skymarket</groupId><artifactId>SkyMarket</artifactId><version>1.0.0</version><packaging>jar</packaging><properties><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding><maven.compiler.release>21</maven.compiler.release></properties><repositories><repository><id>papermc-repo</id><url>https://repo.papermc.io/repository/maven-public/</url></repository><repository><id>jitpack.io</id><url>https://jitpack.io</url></repository></repositories><dependencies><dependency><groupId>io.papermc.paper</groupId><artifactId>paper-api</artifactId><version>1.21.4-R0.1-SNAPSHOT</version><scope>provided</scope></dependency><dependency><groupId>com.github.MilkBowl</groupId><artifactId>VaultAPI</artifactId><version>1.7.1</version><scope>provided</scope></dependency></dependencies><build><finalName>SkyMarket-1.0.0</finalName><resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources></build></project>""")
-open("src/main/resources/plugin.yml","w").write("name: SkyMarket\nversion: 1.0.0\nmain: com.swain.skymarket.SkyMarketPlugin\napi-version: "1.21"\nsoftdepend: [Vault, floodgate, Geyser-Spigot]\ncommands:\n  market:\n    description: Skyblock market menusunu acar.\n    aliases: [m]\n")
-open("src/main/resources/items.yml","w").write("custom-items:\n  cobblestone-gen-tier2:\n    material: COBBLESTONE\n    category: SPECIAL\n    name: "Kiriktas Jenerator Yukseltmesi (Seviye 2)"\n    price: 15.0\n    custom-model-data: 1002\n    lore:\n      - "Kiriktask jeneratoru icin ozel yukseltme parcasi"\n")
-'
-cat << 'JAVAEOF' > src/main/java/com/swain/skymarket/SkyMarketPlugin.java
+printf '%s\n' '<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><groupId>com.swain.skymarket</groupId><artifactId>SkyMarket</artifactId><version>1.0.0</version><packaging>jar</packaging><properties><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding><maven.compiler.release>21</maven.compiler.release></properties><repositories><repository><id>papermc-repo</id><url>https://repo.papermc.io/repository/maven-public/</url></repository><repository><id>jitpack.io</id><url>https://jitpack.io</url></repository></repositories><dependencies><dependency><groupId>io.papermc.paper</groupId><artifactId>paper-api</artifactId><version>1.21.4-R0.1-SNAPSHOT</version><scope>provided</scope></dependency><dependency><groupId>com.github.MilkBowl</groupId><artifactId>VaultAPI</artifactId><version>1.7.1</version><scope>provided</scope></dependency></dependencies><build><finalName>SkyMarket-1.0.0</finalName><resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources></build></project>' > pom.xml
+printf 'name: SkyMarket\nversion: 1.0.0\nmain: com.swain.skymarket.SkyMarketPlugin\napi-version: "1.21"\nsoftdepend: [Vault, floodgate, Geyser-Spigot]\ncommands:\n  market:\n    description: Skyblock market menusunu acar.\n    aliases: [m]\n' > src/main/resources/plugin.yml
+printf 'custom-items:\n  cobblestone-gen-tier2:\n    material: COBBLESTONE\n    category: SPECIAL\n    name: "Kiriktas Jenerator Yukseltmesi (Seviye 2)"\n    price: 15.0\n' > src/main/resources/items.yml
+- run: |
+cat << 'EOF' > src/main/java/com/swain/skymarket/SkyMarketPlugin.java
 package com.swain.skymarket;
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
@@ -494,8 +493,8 @@ public @Nullable List<String> onTabComplete(@NotNull CommandSender s, @NotNull C
 return a.length == 1 ? List.of("ara", "sepet") : List.of();
 }
 }
-JAVAEOF
-mvn -B package
+EOF
+- run: mvn -B package
 - uses: actions/upload-artifact@v4
 with:
 name: SkyMarket-1.0.0-JAR
