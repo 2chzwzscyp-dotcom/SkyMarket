@@ -1,4 +1,4 @@
-name: SkyMarket JAR Olustur
+name: SkyMarket JAR
 on: [push, workflow_dispatch]
 jobs:
 build:
@@ -8,11 +8,7 @@ steps:
 with:
 java-version: '21'
 distribution: 'temurin'
-- run: mkdir -p src/main/java/com/swain/skymarket src/main/resources
-- run: |
-printf '%s\n' '<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><groupId>com.swain.skymarket</groupId><artifactId>SkyMarket</artifactId><version>1.0.0</version><packaging>jar</packaging><properties><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding><maven.compiler.release>21</maven.compiler.release></properties><repositories><repository><id>papermc-repo</id><url>https://repo.papermc.io/repository/maven-public/</url></repository><repository><id>jitpack.io</id><url>https://jitpack.io</url></repository></repositories><dependencies><dependency><groupId>io.papermc.paper</groupId><artifactId>paper-api</artifactId><version>1.21.4-R0.1-SNAPSHOT</version><scope>provided</scope></dependency><dependency><groupId>com.github.MilkBowl</groupId><artifactId>VaultAPI</artifactId><version>1.7.1</version><scope>provided</scope></dependency></dependencies><build><finalName>SkyMarket-1.0.0</finalName><resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources></build></project>' > pom.xml
-printf 'name: SkyMarket\nversion: 1.0.0\nmain: com.swain.skymarket.SkyMarketPlugin\napi-version: "1.21"\nsoftdepend: [Vault, floodgate, Geyser-Spigot]\ncommands:\n  market:\n    description: Skyblock market menusunu acar.\n    aliases: [m]\n' > src/main/resources/plugin.yml
-printf 'custom-items:\n  cobblestone-gen-tier2:\n    material: COBBLESTONE\n    category: SPECIAL\n    name: "Kiriktas Jenerator Yukseltmesi (Seviye 2)"\n    price: 15.0\n' > src/main/resources/items.yml
+- run: mkdir -p src/main/java/com/swain/skymarket src/main/resources && printf '%s\n' '<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><groupId>com.swain.skymarket</groupId><artifactId>SkyMarket</artifactId><version>1.0.0</version><packaging>jar</packaging><properties><project.build.sourceEncoding>UTF-8</project.build.sourceEncoding><maven.compiler.release>21</maven.compiler.release></properties><repositories><repository><id>papermc-repo</id><url>https://repo.papermc.io/repository/maven-public/</url></repository><repository><id>jitpack.io</id><url>https://jitpack.io</url></repository></repositories><dependencies><dependency><groupId>io.papermc.paper</groupId><artifactId>paper-api</artifactId><version>1.21.4-R0.1-SNAPSHOT</version><scope>provided</scope></dependency><dependency><groupId>com.github.MilkBowl</groupId><artifactId>VaultAPI</artifactId><version>1.7.1</version><scope>provided</scope></dependency></dependencies><build><finalName>SkyMarket-1.0.0</finalName><resources><resource><directory>src/main/resources</directory><filtering>true</filtering></resource></resources></build></project>' > pom.xml && printf 'name: SkyMarket\nversion: 1.0.0\nmain: com.swain.skymarket.SkyMarketPlugin\napi-version: "1.21"\nsoftdepend: [Vault, floodgate, Geyser-Spigot]\ncommands:\n  market:\n    description: Market menusunu acar.\n    aliases: [m]\n' > src/main/resources/plugin.yml && printf 'custom-items:\n  gen2:\n    material: COBBLESTONE\n    category: SPECIAL\n    name: "Kiriktas Jenerator Yukseltmesi"\n    price: 15.0\n' > src/main/resources/items.yml
 - run: |
 cat << 'EOF' > src/main/java/com/swain/skymarket/SkyMarketPlugin.java
 package com.swain.skymarket;
@@ -43,10 +39,10 @@ import java.io.IOException;
 import java.util.*;
 public final class SkyMarketPlugin extends JavaPlugin implements CommandExecutor, TabCompleter, Listener {
 public enum MarketCategory {
-FARMING("Tarim ve Hayvancilik", Material.SUGAR_CANE, "Ciftlik urunleri, mahsuller ve spawn yumurtalari"),
-MINING("Maden ve Bloklar", Material.DIAMOND_ORE, "Madenler, kulceler, tas ve tum yapi bloklari"),
-SPECIAL("Spawner ve Ozel Esyalar", Material.SPAWNER, "Spawner, huni, kiziltas ve jenerator esyalari"),
-POTIONS_ENCHANTS("Iksir ve Buyu", Material.EXPERIENCE_BOTTLE, "XP siseleri, buyu kitaplari ve iksir malzemeleri");
+FARMING("Tarim ve Hayvancilik", Material.SUGAR_CANE, "Ciftlik urunleri ve yumurtalar"),
+MINING("Maden ve Bloklar", Material.DIAMOND_ORE, "Madenler, tas ve bloklar"),
+SPECIAL("Spawner ve Ozel Esyalar", Material.SPAWNER, "Spawner, huni ve kiziltas"),
+POTIONS_ENCHANTS("Iksir ve Buyu", Material.EXPERIENCE_BOTTLE, "XP, buyu ve iksir esyalari");
 final String displayName;
 final Material icon;
 final String description;
@@ -151,9 +147,6 @@ TR_NAMES.put(Material.ENCHANTED_BOOK, "Buyu Kitabi");
 TR_NAMES.put(Material.BLAZE_POWDER, "Blaze Tozu");
 TR_NAMES.put(Material.BLAZE_ROD, "Blaze Cubugu");
 TR_NAMES.put(Material.NETHER_WART, "Nether Sigili");
-TR_NAMES.put(Material.GLASS, "Cam");
-TR_NAMES.put(Material.OAK_LOG, "Mese Kutugu");
-TR_NAMES.put(Material.OAK_PLANKS, "Mese Tahtasi");
 }
 @Override
 public void onEnable() {
@@ -222,14 +215,6 @@ e.contains("custom-model-data") ? e.getInt("custom-model-data") : null, e.getStr
 }
 }
 }
-Material[] farm = {Material.SUGAR_CANE, Material.CACTUS, Material.PUMPKIN, Material.MELON, Material.WHEAT, Material.WHEAT_SEEDS, Material.CARROT, Material.POTATO, Material.COW_SPAWN_EGG, Material.PIG_SPAWN_EGG, Material.SHEEP_SPAWN_EGG, Material.CHICKEN_SPAWN_EGG, Material.LEATHER, Material.WHITE_WOOL};
-for (Material m : farm) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.FARMING, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
-Material[] mine = {Material.COBBLESTONE, Material.STONE, Material.COAL, Material.COAL_BLOCK, Material.IRON_INGOT, Material.IRON_BLOCK, Material.GOLD_INGOT, Material.GOLD_BLOCK, Material.DIAMOND, Material.DIAMOND_BLOCK, Material.EMERALD, Material.EMERALD_BLOCK, Material.NETHERITE_INGOT, Material.NETHERITE_BLOCK, Material.GLASS, Material.OAK_LOG, Material.OAK_PLANKS};
-for (Material m : mine) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.MINING, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
-Material[] spec = {Material.SPAWNER, Material.HOPPER, Material.REDSTONE, Material.REDSTONE_BLOCK, Material.PISTON, Material.STICKY_PISTON, Material.OBSERVER};
-for (Material m : spec) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.SPECIAL, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
-Material[] pot = {Material.EXPERIENCE_BOTTLE, Material.ENCHANTED_BOOK, Material.BLAZE_POWDER, Material.BLAZE_ROD, Material.NETHER_WART};
-for (Material m : pot) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.POTIONS_ENCHANTS, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
 for (Material m : Material.values()) {
 if (!m.isItem() || m.isAir() || reg.contains(m)) continue;
 String n = m.name();
@@ -238,7 +223,7 @@ reg.add(m);
 MarketCategory cat = MarketCategory.MINING;
 if (n.contains("POTION") || n.contains("ENCHANT") || n.contains("BREWING") || n.contains("BLAZE") || n.contains("WART") || n.contains("EXPERIENCE")) cat = MarketCategory.POTIONS_ENCHANTS;
 else if (n.contains("SPAWNER") || n.contains("HOPPER") || n.contains("REDSTONE") || n.contains("PISTON") || n.contains("OBSERVER") || n.contains("COMPARATOR") || n.contains("REPEATER")) cat = MarketCategory.SPECIAL;
-else if (n.contains("SPAWN_EGG") || n.contains("SEED") || n.contains("WOOL") || n.contains("LEATHER") || n.contains("BEEF") || n.contains("PORK") || n.contains("MUTTON") || n.contains("CROP")) cat = MarketCategory.FARMING;
+else if (n.contains("SPAWN_EGG") || n.contains("SEED") || n.contains("WOOL") || n.contains("LEATHER") || n.contains("BEEF") || n.contains("PORK") || n.contains("MUTTON") || n.contains("CROP") || n.contains("CANE") || n.contains("CACTUS") || n.contains("PUMPKIN") || n.contains("MELON") || n.contains("CARROT") || n.contains("POTATO") || n.contains("WHEAT")) cat = MarketCategory.FARMING;
 addItem(new MarketItem(n.toLowerCase(Locale.ROOT), m, cat, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
 }
 }
@@ -497,5 +482,5 @@ EOF
 - run: mvn -B package
 - uses: actions/upload-artifact@v4
 with:
-name: SkyMarket-1.0.0-JAR
+name: SkyMarket-JAR
 path: target/SkyMarket-1.0.0.jar
