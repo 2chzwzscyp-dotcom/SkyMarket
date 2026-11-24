@@ -1,0 +1,587 @@
+name: SkyMarket JAR Olustur
+on:
+push:
+workflow_dispatch:
+jobs:
+build:
+runs-on: ubuntu-latest
+steps:
+- name: Proje Dosyalarini Olustur
+run: |
+mkdir -p src/main/java/com/swain/skymarket
+mkdir -p src/main/resources
+cat << 'EOF' > pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<modelVersion>4.0.0</modelVersion>
+<groupId>com.swain.skymarket</groupId>
+<artifactId>SkyMarket</artifactId>
+<version>1.0.0</version>
+<packaging>jar</packaging>
+<properties>
+<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+<maven.compiler.release>21</maven.compiler.release>
+</properties>
+<repositories>
+<repository>
+<id>papermc-repo</id>
+<url>https://repo.papermc.io/repository/maven-public/</url>
+</repository>
+<repository>
+<id>jitpack.io</id>
+<url>https://jitpack.io</url>
+</repository>
+</repositories>
+<dependencies>
+<dependency>
+<groupId>io.papermc.paper</groupId>
+<artifactId>paper-api</artifactId>
+<version>1.21.4-R0.1-SNAPSHOT</version>
+<scope>provided</scope>
+</dependency>
+<dependency>
+<groupId>com.github.MilkBowl</groupId>
+<artifactId>VaultAPI</artifactId>
+<version>1.7.1</version>
+<scope>provided</scope>
+</dependency>
+</dependencies>
+<build>
+<finalName>￼{project.version}</finalName>
+<resources>
+<resource>
+<directory>src/main/resources</directory>
+<filtering>true</filtering>
+</resource>
+</resources>
+<plugins>
+<plugin>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-compiler-plugin</artifactId>
+<version>3.13.0</version>
+<configuration>
+<release>21</release>
+<encoding>UTF-8</encoding>
+</configuration>
+</plugin>
+</plugins>
+</build>
+</project>
+EOF
+cat << 'EOF' > src/main/resources/plugin.yml
+name: SkyMarket
+version: '${project.version}'
+main: com.swain.skymarket.SkyMarketPlugin
+api-version: '1.21'
+softdepend: [Vault, floodgate, Geyser-Spigot]
+commands:
+market:
+description: Skyblock market menusunu acar.
+aliases: [m]
+usage: /market [ara <kelime> | sepet]
+EOF
+cat << 'EOF' > src/main/resources/items.yml
+custom-items:
+cobblestone-gen-tier2:
+material: COBBLESTONE
+category: SPECIAL
+name: "Kiriktas Jenerator Yukseltmesi (Seviye 2)"
+price: 15.0
+custom-model-data: 1002
+lore:
+- "Kiriktask jeneratoru icin ozel yukseltme parcasi"
+EOF
+cat << 'EOF' > src/main/java/com/swain/skymarket/SkyMarketPlugin.java
+package com.swain.skymarket;
+import io.papermc.paper.event.player.AsyncChatEvent;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.milkbowl.vault.economy.Economy;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.command.;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.event.;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.inventory.*;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.RegisteredServiceProvider;
+import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
+public final class SkyMarketPlugin extends JavaPlugin implements CommandExecutor, TabCompleter, Listener {
+public enum MarketCategory {
+FARMING("Tarim ve Hayvancilik", Material.SUGAR_CANE, "Ciftlik urunleri, mahsuller ve spawn yumurtalari"),
+MINING("Maden ve Bloklar", Material.DIAMOND_ORE, "Madenler, kulceler, tas ve tum yapi bloklari"),
+SPECIAL("Spawner ve Ozel Esyalar", Material.SPAWNER, "Spawner, huni, kiziltas ve jenerator esyalari"),
+POTIONS_ENCHANTS("Iksir ve Buyu", Material.EXPERIENCE_BOTTLE, "XP siseleri, buyu kitaplari ve iksir malzemeleri");
+final String displayName;
+final Material icon;
+final String description;
+MarketCategory(String displayName, Material icon, String description) {
+this.displayName = displayName;
+this.icon = icon;
+this.description = description;
+}
+static MarketCategory fromString(String input) {
+if (input == null) return null;
+for (MarketCategory c : values()) {
+if (c.name().equalsIgnoreCase(input) || c.displayName.equalsIgnoreCase(input)) return c;
+}
+return null;
+}
+}
+public record MarketItem(String id, Material material, MarketCategory category, String turkishName,
+double unitPrice, Integer customModelData, List<String> extraLore) {
+ItemStack createPurchasedStack(int amount) {
+ItemStack stack = new ItemStack(material, Math.max(1, amount));
+ItemMeta meta = stack.getItemMeta();
+if (meta != null) {
+if (customModelData != null) meta.setCustomModelData(customModelData);
+if (extraLore != null && !extraLore.isEmpty()) meta.setLore(new ArrayList<>(extraLore));
+stack.setItemMeta(meta);
+}
+return stack;
+}
+}
+public static class CartEntry {
+final String itemId;
+int amount;
+CartEntry(String itemId, int amount) { this.itemId = itemId; this.amount = Math.max(1, amount); }
+void addAmount(int extra) { this.amount = Math.max(1, this.amount + extra); }
+}
+public enum MenuType { MAIN_CATEGORIES, CATEGORY_ITEMS, SEARCH_RESULTS, ITEM_ACTION, CART }
+public static class MarketHolder implements InventoryHolder {
+final MenuType type;
+final MarketCategory category;
+final MarketItem selectedItem;
+final int selectedAmount;
+final int page;
+final String searchQuery;
+Inventory inventory;
+MarketHolder(MenuType type, MarketCategory category, MarketItem selectedItem, int selectedAmount, int page, String searchQuery) {
+this.type = type;
+this.category = category;
+this.selectedItem = selectedItem;
+this.selectedAmount = Math.max(1, selectedAmount);
+this.page = Math.max(0, page);
+this.searchQuery = searchQuery;
+}
+@Override public Inventory getInventory() { return inventory; }
+}
+public record PendingAmountSession(MarketItem item, MarketCategory returnCategory, String returnSearch, int returnPage) {}
+private Economy vaultEconomy;
+private final Map<UUID, Double> fallbackBalances = new HashMap<>();
+private final Map<UUID, List<CartEntry>> cartsByUuid = new HashMap<>();
+private final Map<String, MarketItem> itemsById = new LinkedHashMap<>();
+private final Map<MarketCategory, List<MarketItem>> itemsByCategory = new EnumMap<>(MarketCategory.class);
+private final List<MarketItem> allItems = new ArrayList<>();
+private final Set<UUID> awaitingSearchInput = new HashSet<>();
+private final Map<UUID, PendingAmountSession> awaitingAmountInput = new HashMap<>();
+private static final Map<Material, String> TR_NAMES = new EnumMap<>(Material.class);
+static {
+TR_NAMES.put(Material.COBBLESTONE, "Kiriktas");
+TR_NAMES.put(Material.STONE, "Tas");
+TR_NAMES.put(Material.COAL, "Komur");
+TR_NAMES.put(Material.COAL_BLOCK, "Komur Blogu");
+TR_NAMES.put(Material.IRON_INGOT, "Demir Kulce");
+TR_NAMES.put(Material.IRON_BLOCK, "Demir Blogu");
+TR_NAMES.put(Material.GOLD_INGOT, "Altin Kulce");
+TR_NAMES.put(Material.GOLD_BLOCK, "Altin Blogu");
+TR_NAMES.put(Material.DIAMOND, "Elmas");
+TR_NAMES.put(Material.DIAMOND_BLOCK, "Elmas Blogu");
+TR_NAMES.put(Material.EMERALD, "Zumrut");
+TR_NAMES.put(Material.EMERALD_BLOCK, "Zumrut Blogu");
+TR_NAMES.put(Material.NETHERITE_INGOT, "Netherite Kulce");
+TR_NAMES.put(Material.NETHERITE_BLOCK, "Netherite Blogu");
+TR_NAMES.put(Material.SUGAR_CANE, "Seker Kamisi");
+TR_NAMES.put(Material.CACTUS, "Kaktus");
+TR_NAMES.put(Material.PUMPKIN, "Balkabagi");
+TR_NAMES.put(Material.MELON, "Karpuz");
+TR_NAMES.put(Material.WHEAT, "Bugday");
+TR_NAMES.put(Material.CARROT, "Havuc");
+TR_NAMES.put(Material.POTATO, "Patates");
+TR_NAMES.put(Material.COW_SPAWN_EGG, "Inek Yumurtasi");
+TR_NAMES.put(Material.PIG_SPAWN_EGG, "Domuz Yumurtasi");
+TR_NAMES.put(Material.SHEEP_SPAWN_EGG, "Koyun Yumurtasi");
+TR_NAMES.put(Material.CHICKEN_SPAWN_EGG, "Tavuk Yumurtasi");
+TR_NAMES.put(Material.LEATHER, "Deri");
+TR_NAMES.put(Material.WHITE_WOOL, "Beyaz Yun");
+TR_NAMES.put(Material.SPAWNER, "Spawner");
+TR_NAMES.put(Material.HOPPER, "Huni");
+TR_NAMES.put(Material.REDSTONE, "Kiziltas Tozu");
+TR_NAMES.put(Material.REDSTONE_BLOCK, "Kiziltas Blogu");
+TR_NAMES.put(Material.PISTON, "Piston");
+TR_NAMES.put(Material.STICKY_PISTON, "Yapiskan Piston");
+TR_NAMES.put(Material.OBSERVER, "Gozlemci");
+TR_NAMES.put(Material.EXPERIENCE_BOTTLE, "Tecrube Sisesi (XP)");
+TR_NAMES.put(Material.ENCHANTED_BOOK, "Buyu Kitabi");
+TR_NAMES.put(Material.BLAZE_POWDER, "Blaze Tozu");
+TR_NAMES.put(Material.BLAZE_ROD, "Blaze Cubugu");
+TR_NAMES.put(Material.NETHER_WART, "Nether Sigili");
+TR_NAMES.put(Material.GLASS, "Cam");
+TR_NAMES.put(Material.OAK_LOG, "Mese Kutugu");
+TR_NAMES.put(Material.OAK_PLANKS, "Mese Tahtasi");
+}
+@Override
+public void onEnable() {
+if (!new File(getDataFolder(), "items.yml").exists()) saveResource("items.yml", false);
+setupEconomy();
+loadPlayerData();
+loadCatalog();
+if (getCommand("market") != null) {
+getCommand("market").setExecutor(this);
+getCommand("market").setTabCompleter(this);
+}
+getServer().getPluginManager().registerEvents(this, this);
+}
+@Override
+public void onDisable() { savePlayerData(); }
+private void setupEconomy() {
+if (getServer().getPluginManager().getPlugin("Vault") != null) {
+RegisteredServiceProvider<Economy> rsp = getServer().getServicesManager().getRegistration(Economy.class);
+if (rsp != null) vaultEconomy = rsp.getProvider();
+}
+}
+private double getBalance(OfflinePlayer p) {
+return vaultEconomy != null ? vaultEconomy.getBalance(p) : fallbackBalances.computeIfAbsent(p.getUniqueId(), k -> 10000.0);
+}
+private boolean withdraw(OfflinePlayer p, double amount) {
+if (getBalance(p) < amount) return false;
+if (vaultEconomy != null) return vaultEconomy.withdrawPlayer(p, amount).transactionSuccess();
+fallbackBalances.put(p.getUniqueId(), getBalance(p) - amount);
+return true;
+}
+private String fmt(double amount) {
+return amount == Math.rint(amount) ? ((long) amount) + " TL" : String.format(Locale.US, "%.2f TL", amount);
+}
+private String getTrName(Material m) {
+if (TR_NAMES.containsKey(m)) return TR_NAMES.get(m);
+String raw = m.name().toLowerCase(Locale.ROOT).replace('_', ' ');
+StringBuilder sb = new StringBuilder();
+boolean cap = true;
+for (char c : raw.toCharArray()) {
+if (c == ' ') { sb.append(' '); cap = true; }
+else if (cap) { sb.append(Character.toUpperCase(c)); cap = false; }
+else sb.append(c);
+}
+return sb.toString();
+}
+private void loadCatalog() {
+itemsById.clear();
+allItems.clear();
+for (MarketCategory c : MarketCategory.values()) itemsByCategory.put(c, new ArrayList<>());
+Random rnd = new Random(20260524L);
+Set<Material> reg = EnumSet.noneOf(Material.class);
+File f = new File(getDataFolder(), "items.yml");
+if (f.exists()) {
+YamlConfiguration y = YamlConfiguration.loadConfiguration(f);
+ConfigurationSection sec = y.getConfigurationSection("custom-items");
+if (sec != null) {
+for (String k : sec.getKeys(false)) {
+ConfigurationSection e = sec.getConfigurationSection(k);
+if (e == null) continue;
+Material m = Material.matchMaterial(e.getString("material", ""));
+MarketCategory c = MarketCategory.fromString(e.getString("category", "SPECIAL"));
+if (m == null || !m.isItem() || c == null) continue;
+addItem(new MarketItem("custom_" + k.toLowerCase(Locale.ROOT), m, c,
+e.getString("name", getTrName(m)), e.getDouble("price", 10.0 + rnd.nextInt(6)),
+e.contains("custom-model-data") ? e.getInt("custom-model-data") : null, e.getStringList("lore")));
+}
+}
+}
+Material[] farm = {Material.SUGAR_CANE, Material.CACTUS, Material.PUMPKIN, Material.MELON, Material.WHEAT, Material.WHEAT_SEEDS, Material.CARROT, Material.POTATO, Material.COW_SPAWN_EGG, Material.PIG_SPAWN_EGG, Material.SHEEP_SPAWN_EGG, Material.CHICKEN_SPAWN_EGG, Material.LEATHER, Material.WHITE_WOOL};
+for (Material m : farm) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.FARMING, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
+Material[] mine = {Material.COBBLESTONE, Material.STONE, Material.COAL, Material.COAL_BLOCK, Material.IRON_INGOT, Material.IRON_BLOCK, Material.GOLD_INGOT, Material.GOLD_BLOCK, Material.DIAMOND, Material.DIAMOND_BLOCK, Material.EMERALD, Material.EMERALD_BLOCK, Material.NETHERITE_INGOT, Material.NETHERITE_BLOCK, Material.GLASS, Material.OAK_LOG, Material.OAK_PLANKS};
+for (Material m : mine) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.MINING, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
+Material[] spec = {Material.SPAWNER, Material.HOPPER, Material.REDSTONE, Material.REDSTONE_BLOCK, Material.PISTON, Material.STICKY_PISTON, Material.OBSERVER};
+for (Material m : spec) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.SPECIAL, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
+Material[] pot = {Material.EXPERIENCE_BOTTLE, Material.ENCHANTED_BOOK, Material.BLAZE_POWDER, Material.BLAZE_ROD, Material.NETHER_WART};
+for (Material m : pot) if (m.isItem() && reg.add(m)) addItem(new MarketItem(m.name().toLowerCase(Locale.ROOT), m, MarketCategory.POTIONS_ENCHANTS, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
+for (Material m : Material.values()) {
+if (!m.isItem() || m.isAir() || reg.contains(m)) continue;
+String n = m.name();
+if (n.startsWith("LEGACY_") || n.contains("COMMAND_BLOCK") || n.contains("STRUCTURE_") || n.contains("JIGSAW") || n.contains("BARRIER") || n.contains("LIGHT") || n.contains("DEBUG_STICK")) continue;
+reg.add(m);
+MarketCategory cat = MarketCategory.MINING;
+if (n.contains("POTION") || n.contains("ENCHANT") || n.contains("BREWING") || n.contains("BLAZE") || n.contains("WART") || n.contains("EXPERIENCE")) cat = MarketCategory.POTIONS_ENCHANTS;
+else if (n.contains("SPAWNER") || n.contains("HOPPER") || n.contains("REDSTONE") || n.contains("PISTON") || n.contains("OBSERVER") || n.contains("COMPARATOR") || n.contains("REPEATER")) cat = MarketCategory.SPECIAL;
+else if (n.contains("SPAWN_EGG") || n.contains("SEED") || n.contains("WOOL") || n.contains("LEATHER") || n.contains("BEEF") || n.contains("PORK") || n.contains("MUTTON") || n.contains("CROP")) cat = MarketCategory.FARMING;
+addItem(new MarketItem(n.toLowerCase(Locale.ROOT), m, cat, getTrName(m), 10.0 + rnd.nextInt(6), null, List.of()));
+}
+}
+private void addItem(MarketItem i) {
+itemsById.put(i.id(), i);
+itemsByCategory.get(i.category()).add(i);
+allItems.add(i);
+}
+private List<MarketItem> search(String q) {
+String norm = norm(q);
+List<MarketItem> res = new ArrayList<>();
+for (MarketItem i : allItems) {
+if (norm(i.turkishName()).contains(norm) || norm(i.material().name().replace('_', ' ')).contains(norm) || norm(i.id()).contains(norm)) res.add(i);
+}
+return res;
+}
+private String norm(String s) {
+return s.toLowerCase(Locale.ROOT).replace('ı', 'i').replace('İ', 'i').replace('ş', 's').replace('ğ', 'g').replace('ü', 'u').replace('ö', 'o').replace('ç', 'c').trim();
+}
+private void loadPlayerData() {
+File f = new File(getDataFolder(), "players.yml");
+if (!f.exists()) return;
+YamlConfiguration cfg = YamlConfiguration.loadConfiguration(f);
+ConfigurationSection sec = cfg.getConfigurationSection("players");
+if (sec == null) return;
+for (String u : sec.getKeys(false)) {
+try {
+UUID id = UUID.fromString(u);
+List<CartEntry> list = new ArrayList<>();
+for (Map<?, ?> m : sec.getMapList(u + ".cart")) {
+if (m.get("itemId") != null && m.get("amount") != null) list.add(new CartEntry(String.valueOf(m.get("itemId")), Integer.parseInt(String.valueOf(m.get("amount")))));
+}
+cartsByUuid.put(id, list);
+} catch (Exception ignored) {}
+}
+}
+private void savePlayerData() {
+YamlConfiguration cfg = new YamlConfiguration();
+for (var e : cartsByUuid.entrySet()) {
+List<Map<String, Object>> ser = new ArrayList<>();
+for (CartEntry c : e.getValue()) ser.add(Map.of("itemId", c.itemId, "amount", c.amount));
+cfg.set("players." + e.getKey() + ".cart", ser);
+}
+try { cfg.save(new File(getDataFolder(), "players.yml")); } catch (IOException ignored) {}
+}
+private void openMainMenu(Player p) {
+awaitingSearchInput.remove(p.getUniqueId());
+awaitingAmountInput.remove(p.getUniqueId());
+MarketHolder h = new MarketHolder(MenuType.MAIN_CATEGORIES, null, null, 1, 0, null);
+Inventory inv = Bukkit.createInventory(h, 27, Component.text("SkyMarket - Kategoriler", NamedTextColor.DARK_GRAY));
+h.inventory = inv;
+inv.setItem(4, btn(Material.COMPASS, "Esya / Blok Ara", NamedTextColor.AQUA, List.of("Tikla ve sohbete blok/esya adi yaz")));
+inv.setItem(10, catBtn(MarketCategory.FARMING));
+inv.setItem(12, catBtn(MarketCategory.MINING));
+inv.setItem(14, catBtn(MarketCategory.SPECIAL));
+inv.setItem(16, catBtn(MarketCategory.POTIONS_ENCHANTS));
+inv.setItem(21, btn(Material.GOLD_INGOT, "Bakiyen: " + fmt(getBalance(p)), NamedTextColor.GOLD, List.of()));
+inv.setItem(23, btn(Material.CHEST, "Sepetim (" + cartCount(p.getUniqueId()) + " urun)", NamedTextColor.GREEN, List.of("Toplam: " + fmt(cartTotal(p.getUniqueId())))));
+p.openInventory(inv);
+}
+private void openPaged(Player p, MenuType t, MarketCategory c, String q, String title, List<MarketItem> list, int page) {
+int max = Math.max(0, (list.size() - 1) / 45);
+int sp = Math.min(Math.max(0, page), max);
+MarketHolder h = new MarketHolder(t, c, null, 1, sp, q);
+Inventory inv = Bukkit.createInventory(h, 54, Component.text(title + " (" + (sp + 1) + "/" + (max + 1) + ")", NamedTextColor.DARK_GRAY));
+h.inventory = inv;
+for (int i = sp * 45; i < Math.min(list.size(), (sp + 1) * 45); i++) {
+MarketItem it = list.get(i);
+inv.setItem(i - sp * 45, btn(it.material(), it.turkishName(), NamedTextColor.YELLOW, List.of("Birim Fiyat: " + fmt(it.unitPrice()), "Secmek icin tikla")));
+}
+if (sp > 0) inv.setItem(45, btn(Material.ARROW, "Onceki Sayfa", NamedTextColor.WHITE, List.of()));
+inv.setItem(47, btn(Material.COMPASS, "Yeni Arama Yap", NamedTextColor.AQUA, List.of()));
+inv.setItem(49, btn(Material.OAK_DOOR, "Ana Menuye Don", NamedTextColor.WHITE, List.of()));
+inv.setItem(51, btn(Material.CHEST, "Sepetim (" + cartCount(p.getUniqueId()) + ")", NamedTextColor.GREEN, List.of("Toplam: " + fmt(cartTotal(p.getUniqueId())))));
+if (sp < max) inv.setItem(53, btn(Material.ARROW, "Sonraki Sayfa", NamedTextColor.WHITE, List.of()));
+p.openInventory(inv);
+}
+private void openAction(Player p, MarketItem it, int amt, MarketCategory rc, String rq, int rp) {
+int sa = Math.max(1, amt);
+double tot = it.unitPrice() * sa;
+MarketHolder h = new MarketHolder(MenuType.ITEM_ACTION, rc, it, sa, rp, rq);
+Inventory inv = Bukkit.createInventory(h, 27, Component.text(it.turkishName() + " x" + sa, NamedTextColor.DARK_GRAY));
+h.inventory = inv;
+inv.setItem(1, btn(Material.RED_STAINED_GLASS_PANE, "-16 Adet", NamedTextColor.RED, List.of()));
+inv.setItem(2, btn(Material.ORANGE_STAINED_GLASS_PANE, "-1 Adet", NamedTextColor.GOLD, List.of()));
+inv.setItem(4, btn(Material.PAPER, "Miktar Yaz (Or: 64)", NamedTextColor.AQUA, List.of("Sohbete adet yazmak icin tikla")));
+inv.setItem(6, btn(Material.LIME_STAINED_GLASS_PANE, "+1 Adet", NamedTextColor.GREEN, List.of()));
+inv.setItem(7, btn(Material.GREEN_STAINED_GLASS_PANE, "+16 Adet", NamedTextColor.DARK_GREEN, List.of()));
+inv.setItem(10, btn(it.material(), it.turkishName() + " (x" + sa + ")", NamedTextColor.YELLOW, List.of("Toplam: " + fmt(tot), "Bakiye: " + fmt(getBalance(p)))));
+inv.setItem(12, btn(Material.CHEST, "Sepete Ekle", NamedTextColor.AQUA, List.of("Toplam: " + fmt(tot))));
+inv.setItem(14, btn(Material.EMERALD_BLOCK, "Satin Al", NamedTextColor.GREEN, List.of("Aninda envantere gelir", "Ucret: " + fmt(tot))));
+inv.setItem(16, btn(Material.BARRIER, "Iptal Et", NamedTextColor.RED, List.of("Geri don")));
+p.openInventory(inv);
+}
+private void openCart(Player p) {
+List<CartEntry> cart = cartsByUuid.computeIfAbsent(p.getUniqueId(), k -> new ArrayList<>());
+MarketHolder h = new MarketHolder(MenuType.CART, null, null, 1, 0, null);
+Inventory inv = Bukkit.createInventory(h, 54, Component.text("Sepetim", NamedTextColor.DARK_GRAY));
+h.inventory = inv;
+int slot = 0;
+for (CartEntry ce : cart) {
+if (slot >= 45) break;
+MarketItem it = itemsById.get(ce.itemId);
+if (it != null) inv.setItem(slot++, btn(it.material(), it.turkishName() + " x" + ce.amount, NamedTextColor.YELLOW, List.of("Tutar: " + fmt(it.unitPrice() * ce.amount))));
+}
+inv.setItem(45, btn(Material.OAK_DOOR, "Ana Menuye Don", NamedTextColor.WHITE, List.of()));
+inv.setItem(48, btn(Material.EMERALD_BLOCK, "Sepeti Satin Al", NamedTextColor.GREEN, List.of("Genel Toplam: " + fmt(cartTotal(p.getUniqueId())))));
+inv.setItem(50, btn(Material.BARRIER, "Sepeti Temizle", NamedTextColor.RED, List.of()));
+p.openInventory(inv);
+}
+private ItemStack catBtn(MarketCategory c) {
+return btn(c.icon, c.displayName, NamedTextColor.YELLOW, List.of(c.description, "Urun: " + itemsByCategory.get(c).size()));
+}
+private ItemStack btn(Material m, String name, NamedTextColor color, List<String> loreLines) {
+ItemStack s = new ItemStack((m != null && m.isItem() && !m.isAir()) ? m : Material.STONE);
+ItemMeta meta = s.getItemMeta();
+if (meta != null) {
+meta.displayName(Component.text(name, color).decoration(TextDecoration.ITALIC, false));
+if (!loreLines.isEmpty()) {
+List<Component> l = new ArrayList<>();
+for (String line : loreLines) l.add(Component.text(line, NamedTextColor.GRAY).decoration(TextDecoration.ITALIC, false));
+meta.lore(l);
+}
+s.setItemMeta(meta);
+}
+return s;
+}
+private int cartCount(UUID u) {
+int t = 0;
+for (CartEntry c : cartsByUuid.getOrDefault(u, List.of())) t += c.amount;
+return t;
+}
+private double cartTotal(UUID u) {
+double s = 0;
+for (CartEntry c : cartsByUuid.getOrDefault(u, List.of())) {
+MarketItem it = itemsById.get(c.itemId);
+if (it != null) s += it.unitPrice() * c.amount;
+}
+return s;
+}
+private void giveItems(Player p, MarketItem it, int total) {
+int max = Math.max(1, it.material().getMaxStackSize());
+int rem = total;
+while (rem > 0) {
+int b = Math.min(max, rem);
+for (ItemStack drop : p.getInventory().addItem(it.createPurchasedStack(b)).values()) p.getWorld().dropItemNaturally(p.getLocation(), drop);
+rem -= b;
+}
+}
+@EventHandler
+public void onClick(InventoryClickEvent e) {
+if (!(e.getWhoClicked() instanceof Player p) || !(e.getInventory().getHolder() instanceof MarketHolder h)) return;
+e.setCancelled(true);
+if (e.getClickedInventory() == null || !e.getClickedInventory().equals(e.getInventory())) return;
+int s = e.getSlot();
+if (h.type == MenuType.MAIN_CATEGORIES) {
+if (s == 4) { p.closeInventory(); awaitingSearchInput.add(p.getUniqueId()); p.sendMessage(Component.text("Aramak istedigin esyayi sohbette yaz (iptal icin: iptal).", NamedTextColor.AQUA)); }
+else if (s == 10) openPaged(p, MenuType.CATEGORY_ITEMS, MarketCategory.FARMING, null, MarketCategory.FARMING.displayName, itemsByCategory.get(MarketCategory.FARMING), 0);
+else if (s == 12) openPaged(p, MenuType.CATEGORY_ITEMS, MarketCategory.MINING, null, MarketCategory.MINING.displayName, itemsByCategory.get(MarketCategory.MINING), 0);
+else if (s == 14) openPaged(p, MenuType.CATEGORY_ITEMS, MarketCategory.SPECIAL, null, MarketCategory.SPECIAL.displayName, itemsByCategory.get(MarketCategory.SPECIAL), 0);
+else if (s == 16) openPaged(p, MenuType.CATEGORY_ITEMS, MarketCategory.POTIONS_ENCHANTS, null, MarketCategory.POTIONS_ENCHANTS.displayName, itemsByCategory.get(MarketCategory.POTIONS_ENCHANTS), 0);
+else if (s == 23) openCart(p);
+} else if (h.type == MenuType.CATEGORY_ITEMS || h.type == MenuType.SEARCH_RESULTS) {
+boolean isSearch = h.type == MenuType.SEARCH_RESULTS;
+List<MarketItem> list = isSearch ? search(h.searchQuery) : itemsByCategory.get(h.category);
+if (s < 45 && h.page * 45 + s < list.size()) openAction(p, list.get(h.page * 45 + s), 1, h.category, h.searchQuery, h.page);
+else if (s == 45 && h.page > 0) openPaged(p, h.type, h.category, h.searchQuery, isSearch ? "Arama: " + h.searchQuery : h.category.displayName, list, h.page - 1);
+else if (s == 47) { p.closeInventory(); awaitingSearchInput.add(p.getUniqueId()); p.sendMessage(Component.text("Aramak istedigin esyayi sohbette yaz:", NamedTextColor.AQUA)); }
+else if (s == 49) openMainMenu(p);
+else if (s == 51) openCart(p);
+else if (s == 53) openPaged(p, h.type, h.category, h.searchQuery, isSearch ? "Arama: " + h.searchQuery : h.category.displayName, list, h.page + 1);
+} else if (h.type == MenuType.ITEM_ACTION && h.selectedItem != null) {
+MarketItem it = h.selectedItem;
+int amt = h.selectedAmount;
+if (s == 1) openAction(p, it, Math.max(1, amt - 16), h.category, h.searchQuery, h.page);
+else if (s == 2) openAction(p, it, Math.max(1, amt - 1), h.category, h.searchQuery, h.page);
+else if (s == 6) openAction(p, it, amt + 1, h.category, h.searchQuery, h.page);
+else if (s == 7) openAction(p, it, amt + 16, h.category, h.searchQuery, h.page);
+else if (s == 4) { p.closeInventory(); awaitingAmountInput.put(p.getUniqueId(), new PendingAmountSession(it, h.category, h.searchQuery, h.page)); p.sendMessage(Component.text("Almak istedigin adedi yaz (ornek: 64):", NamedTextColor.AQUA)); }
+else if (s == 12) {
+List<CartEntry> cart = cartsByUuid.computeIfAbsent(p.getUniqueId(), k -> new ArrayList<>());
+boolean found = false;
+for (CartEntry ce : cart) if (ce.itemId.equals(it.id())) { ce.addAmount(amt); found = true; break; }
+if (!found) cart.add(new CartEntry(it.id(), amt));
+savePlayerData();
+p.sendMessage(Component.text(amt + "x " + it.turkishName() + " sepete eklendi.", NamedTextColor.GREEN));
+returnBack(p, h);
+} else if (s == 14) {
+double cost = it.unitPrice() * amt;
+if (!withdraw(p, cost)) { p.sendMessage(Component.text("Yetersiz bakiye! Gereken: " + fmt(cost), NamedTextColor.RED)); return; }
+giveItems(p, it, amt);
+p.sendMessage(Component.text(amt + "x " + it.turkishName() + " satin alindi (" + fmt(cost) + ").", NamedTextColor.GREEN));
+returnBack(p, h);
+} else if (s == 16) returnBack(p, h);
+} else if (h.type == MenuType.CART) {
+if (s == 45) openMainMenu(p);
+else if (s == 48) {
+List<CartEntry> cart = cartsByUuid.getOrDefault(p.getUniqueId(), List.of());
+if (cart.isEmpty()) return;
+double tot = cartTotal(p.getUniqueId());
+if (!withdraw(p, tot)) { p.sendMessage(Component.text("Yetersiz bakiye!", NamedTextColor.RED)); return; }
+for (CartEntry ce : cart) { MarketItem it = itemsById.get(ce.itemId); if (it != null) giveItems(p, it, ce.amount); }
+cartsByUuid.put(p.getUniqueId(), new ArrayList<>());
+savePlayerData();
+p.sendMessage(Component.text("Sepet satin alindi (" + fmt(tot) + ").", NamedTextColor.GREEN));
+openMainMenu(p);
+} else if (s == 50) { cartsByUuid.put(p.getUniqueId(), new ArrayList<>()); savePlayerData(); openCart(p); }
+}
+}
+private void returnBack(Player p, MarketHolder h) {
+if (h.searchQuery != null && !h.searchQuery.isBlank()) openPaged(p, MenuType.SEARCH_RESULTS, null, h.searchQuery, "Arama: " + h.searchQuery, search(h.searchQuery), h.page);
+else if (h.category != null) openPaged(p, MenuType.CATEGORY_ITEMS, h.category, null, h.category.displayName, itemsByCategory.get(h.category), h.page);
+else openMainMenu(p);
+}
+@EventHandler(priority = EventPriority.LOWEST)
+public void onChat(AsyncChatEvent e) {
+Player p = e.getPlayer();
+String msg = PlainTextComponentSerializer.plainText().serialize(e.message()).trim();
+if (awaitingSearchInput.remove(p.getUniqueId())) {
+e.setCancelled(true);
+Bukkit.getScheduler().runTask(this, () -> {
+if (msg.equalsIgnoreCase("iptal")) openMainMenu(p);
+else openPaged(p, MenuType.SEARCH_RESULTS, null, msg, "Arama: " + msg, search(msg), 0);
+});
+} else if (awaitingAmountInput.containsKey(p.getUniqueId())) {
+PendingAmountSession ses = awaitingAmountInput.remove(p.getUniqueId());
+e.setCancelled(true);
+Bukkit.getScheduler().runTask(this, () -> {
+try {
+int a = Math.max(1, Integer.parseInt(msg));
+openAction(p, ses.item(), a, ses.returnCategory(), ses.returnSearch(), ses.returnPage());
+} catch (NumberFormatException ex) {
+openAction(p, ses.item(), 1, ses.returnCategory(), ses.returnSearch(), ses.returnPage());
+}
+});
+}
+}
+@EventHandler public void onQuit(PlayerQuitEvent e) { awaitingSearchInput.remove(e.getPlayer().getUniqueId()); awaitingAmountInput.remove(e.getPlayer().getUniqueId()); savePlayerData(); }
+@Override
+public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+if (!(sender instanceof Player p)) return true;
+if (args.length == 0) openMainMenu(p);
+else if (args[0].equalsIgnoreCase("sepet")) openCart(p);
+else {
+String q = args[0].equalsIgnoreCase("ara") && args.length > 1 ? String.join(" ", Arrays.copyOfRange(args, 1, args.length)) : String.join(" ", args);
+openPaged(p, MenuType.SEARCH_RESULTS, null, q, "Arama: " + q, search(q), 0);
+}
+return true;
+}
+@Override
+public @Nullable List<String> onTabComplete(@NotNull CommandSender s, @NotNull Command c, @NotNull String l, @NotNull String[] a) {
+return a.length == 1 ? List.of("ara", "sepet") : List.of();
+}
+}
+EOF
+- name: JDK 21 Kur
+uses: actions/setup-java@v4
+with:
+java-version: '21'
+distribution: 'temurin'
+- name: JAR Derle
+run: mvn -B package
+- name: JAR Indirme Butonu Olustur
+uses: actions/upload-artifact@v4
+with:
+name: SkyMarket-1.0.0-JAR
+path: target/SkyMarket-1.0.0.jar
